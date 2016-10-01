@@ -1,0 +1,95 @@
+     1                                  section .data
+     2 00000000 66696C655F696E7075-     	f_in: db "file_input.txt",0
+     3 00000009 742E74787400       
+     4 0000000F 66696C655F6F757470-     	f_out: db "file_output.txt",0
+     5 00000018 75742E74787400     
+     6                                  section .bss
+     7 00000000 <res 00000001>          	Buff resb 1		;hold the value of one char
+     8 00000001 <res 00000004>          	fd_in resb 4
+     9 00000005 <res 00000004>          	fd_out resb 4
+    10                                  section .data
+    11                                  global _start
+    12                                  _start:
+    13 0000001F 90                      	nop			;keeps gdb debugger happy
+    14                                  ;Creates the output file that will be used to store
+    15                                  ;the encoded ROT13 data
+    16                                  Create:
+    17 00000020 B808000000              	mov eax, 8		;sys call, create
+    18 00000025 BB[0F000000]            	mov ebx, f_out		;file name is ebx register
+    19 0000002A B9B6010000              	mov ecx, 666q		;file permisions for the outfile in octal
+    20 0000002F CD80                    	int 80h			;kernel call
+    21 00000031 A3[05000000]            	mov [fd_out], eax	;mov file desc into fd_out
+    22                                  
+    23                                  ;Open the input file to be read in read only mode
+    24                                  ;(0) = read only
+    25                                  ;(1) = write only
+    26                                  ;(2) = read write only
+    27                                  Open:
+    28 00000036 B805000000              	mov eax, 5		;sys call, open
+    29 0000003B BB[00000000]            	mov ebx, f_in		;file name in ebx
+    30 00000040 B900000000              	mov ecx, 0		;file access mode (0) == read only
+    31 00000045 CD80                    	int 80h			;kernel call
+    32 00000047 A3[01000000]            	mov [fd_in], eax	;mov file desc into fd_in
+    33                                  
+    34                                  ;Read the opened file data into Buff var declared above
+    35                                  ;Buff only holds 1 byte
+    36                                  Read:	
+    37 0000004C B803000000              	mov eax, 3		;sys call, read
+    38 00000051 8B1D[01000000]          	mov ebx, [fd_in]	;mov file desc in ebx
+    39 00000057 B9[00000000]            	mov ecx, Buff		;mov pointer Buff into ecx
+    40 0000005C BA01000000              	mov edx, 1		;mov Buff size into edx
+    41 00000061 CD80                    	int 80h
+    42                                  
+    43 00000063 83F800                  	cmp eax, 0		;check val in eax with 0
+    44 00000066 744F                    	je Exit			;if eax is (0 means EOF) so exit
+    45                                  	
+    46                                  ;Test for ASCII characters, if not ASCII just 
+    47                                  ;jump to write, dont bother encoding
+    48                                  ;Will need better way to test as this assumes
+    49                                  ;everything in between 'A' and 'z' are letters
+    50 00000068 803D[00000000]7A        	cmp byte [Buff], 'z'
+    51 0000006F 772D                    	ja Write		;if greater then z then not ASCII
+    52 00000071 803D[00000000]41        	cmp byte [Buff], 'A'
+    53 00000078 7224                    	jb Write
+    54                                  ;after this Buff is a "letter" after check
+    55                                  ;convert with ROT13 encoding
+    56                                  ;check if Buff is less then middle of "UPPER CASE" letters
+    57                                  ;if so add 13 to the value (Check against "N")
+    58 0000007A 803D[00000000]4E        	cmp byte [Buff], 'N'	;check if val is <= N
+    59 00000081 7250                    	jb Add_13		;add 13 to the value
+    60 00000083 803D[00000000]5A        	cmp byte [Buff], 'Z'	;check if val is <= Z
+    61 0000008A 7650                    	jbe Sub_13		;sub 13 to the value
+    62 0000008C 803D[00000000]6E        	cmp byte [Buff], 'n'	;check if val is <= n
+    63 00000093 723E                    	jb Add_13		;add 13 to the value
+    64 00000095 803D[00000000]7A        	cmp byte [Buff], 'z'	;check if val is <= z 
+    65 0000009C 763E                    	jbe Sub_13		;sub 13 to the value
+    66                                  	
+    67                                  ;write all the data encoded into the file
+    68                                  Write:
+    69 0000009E B804000000              	mov eax, 4		;sys call, write
+    70 000000A3 8B1D[05000000]          	mov ebx, [fd_out]	;file descriptor
+    71 000000A9 B9[00000000]            	mov ecx, Buff		;message to write
+    72 000000AE BA01000000              	mov edx, 1		;length of message
+    73 000000B3 CD80                    	int 80h
+    74 000000B5 EB95                    	jmp Read		;go back to begining and read again
+    75                                  
+    76                                  Exit:
+    77                                  ;close the files
+    78                                  Close_files:
+    79 000000B7 B806000000              	mov eax, 6		;sys call, close
+    80 000000BC 8B1D[01000000]          	mov ebx, [fd_in]	;put file descriptor in ebx
+    81 000000C2 CD80                    	int 80h
+    82 000000C4 8B1D[05000000]          	mov ebx, [fd_out]
+    83 000000CA CD80                    	int 80h
+    84                                  ;now exit after files are closed
+    85 000000CC B801000000              	mov eax, 1		;sys call, exit
+    86 000000D1 CD80                    	int 80h
+    87                                  
+    88                                  ;add 13 to the value
+    89                                  Add_13:
+    90 000000D3 8005[00000000]0D        	add byte [Buff], 13
+    91 000000DA EBC2                    	jmp Write
+    92                                  ;subtract 13 from the value
+    93                                  Sub_13:
+    94 000000DC 802D[00000000]0D        	sub byte [Buff], 13
+    95 000000E3 EBB9                    	jmp Write
